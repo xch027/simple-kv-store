@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+enum OperationType{
+    PUT = 0;
+    GET = 1;
+    DELETE = 2;
+    SCAN = 3;
+}
+
+enum OperationStatus{
+    SUCCESS = 0;
+    ERROR = 1;
+    // Todo: could be different error types
+}
+
+//Todo: could be various key types
+//enum KeyType{
+//    DEFAULT = 0;
+//}
+
+message Key{
+    bytes userKey = 1;
+    // Todo: could be various key types
+    // KeyType keyType = 1;
+}
+
+message KvEntry{
+    Key key = 1;
+    bytes value=2;
+}
+
+message PutKvRequest{
+    OperationType type = 1;
+    KvEntry entry = 2;
+}
+
+message SliceInfo{
+    string keyHash = 1;
+    uint32 index = 2;
+    uint32 offset = 3;
+    uint32 length = 4;
+    string sliceHash = 5;
+}
+
+message ValueInfo{
+    bool valueSliced = 1;
+    repeated SliceInfo sliceInfo = 2;
+    bytes lastValue = 3;
+}
+
+message PutKvResponse{
+    OperationStatus status = 1;
+}
+
+message GetKvRequest{
+    OperationType type = 1;
+    Key key = 2;
+}
+
+message GetKvResponse{
+    OperationStatus status = 1;
+    bytes value = 2;
+}
+
+message DeleteKvRequest{
+    OperationType type = 1;
+    Key key = 2;
+}
+
+message DeleteKvResponse{
+    OperationStatus status = 1;
+}
+
+message ScanKvRequest{
+    OperationType type = 1;
+    Key key = 2;
+}
+
+message ScanKvResponse{
+    OperationStatus status = 1;
+    KvEntry entries = 2;
+    Key token = 3;
+}
+
+service KvOperation {
+    rpc Put (PutKvRequest) returns (PutKvResponse);
+    rpc Get (GetKvRequest) returns (GetKvResponse);
+    rpc Delete (DeleteKvRequest) returns (DeleteKvResponse);
+    rpc Scan (ScanKvRequest) returns (ScanKvResponse);
+}

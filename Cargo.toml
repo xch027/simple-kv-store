@@ -1,0 +1,29 @@
+[package]
+name = "server"
+version = "0.1.0"
+authors = ["xiaochen <xiao.ch@outlook.com>"]
+edition = "2018"
+
+[lib]
+name = "protos"
+path = "src/protos/mod.rs"
+
+[[bin]]
+name = "server"
+path = "src/kv_server.rs"
+
+[[bin]]
+name = "client"
+path = "src/kv_client.rs"
+
+[dependencies]
+rocksdb = { path = "rust-rocksdb" }
+grpcio = "0.4"
+grpcio-compiler = "0.4"
+futures = "0.1.16"
+protobuf = "2.0.2"
+rand = "0.6.4"
+rust-crypto = "0.2.36"
+
+[build-dependencies]
+protoc-grpcio = "0.3.1"
