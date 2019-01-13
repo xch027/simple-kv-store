@@ -10,18 +10,21 @@ enum OperationType{
 enum OperationStatus{
     SUCCESS = 0;
     ERROR = 1;
-    // Todo: could be different error types
+    ERROR_TYPE_INCORRECT = 2;
+    ERROR_PUT_SLICE = 3;
+    ERROR_KEY_HASH_INCORRECT = 4;
+    ERROR_SLICE_NOT_FOUND = 5;
+    ERROR_KEY_NOT_FOUND = 6;
 }
 
-//Todo: could be various key types
-//enum KeyType{
-//    DEFAULT = 0;
-//}
+enum KeyType{
+    DEFAULT_KEY = 0;
+    SLICE_KEY = 1;
+}
 
 message Key{
     bytes userKey = 1;
-    // Todo: could be various key types
-    // KeyType keyType = 1;
+    KeyType keyType = 2;
 }
 
 message KvEntry{
@@ -44,7 +47,7 @@ message SliceInfo{
 
 message ValueInfo{
     bool valueSliced = 1;
-    repeated SliceInfo sliceInfo = 2;
+    repeated Key sliceInfoKey = 2;
     bytes lastValue = 3;
 }
 
@@ -78,7 +81,7 @@ message ScanKvRequest{
 
 message ScanKvResponse{
     OperationStatus status = 1;
-    KvEntry entries = 2;
+    repeated KvEntry entries = 2;
     Key token = 3;
 }
 

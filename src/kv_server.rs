@@ -2,6 +2,7 @@ extern crate futures;
 extern crate grpcio;
 extern crate protos;
 extern crate crypto;
+extern crate rocksdb;
 
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
@@ -9,7 +10,7 @@ use crypto::sha2::Sha256;
 use std::io::Read;
 use std::sync::Arc;
 use std::{io, thread};
-use rocksdb::{DB, Writable};
+use rocksdb::{DB, Direction, IteratorMode};
 use rocksdb::DBCompactionStyle::Universal;
 
 use futures::sync::oneshot;
@@ -25,8 +26,10 @@ use protobuf::Message;
 struct KvOperationService;
 
 static DB_PATH: &str = "/tmp/rocksdb.1";
-// 1k
-static SLICE_SIZE: usize = 1024;
+// 256 B
+static SLICE_SIZE: usize = 256;
+// max key number in scan
+static SCAN_MAX_KEYS: usize = 10;
 
 fn create_slice_info(key_hash: String, index: u32, offset: u32, length: u32, slice_hash: String) -> SliceInfo{
     let mut slice_info = SliceInfo::new();
@@ -39,16 +42,6 @@ fn create_slice_info(key_hash: String, index: u32, offset: u32, length: u32, sli
     return slice_info;
 }
 
-//fn create_value_info (value_sliced: bool, slices: u32, value: bytes) -> ValueInfo{
-//    let mut value_info = ValueInfo::new();
-//    value_info.set_valueSliced(value_sliced);
-//    for i in 0..slices {
-//
-//    }
-//    value_info.set_value(value);
-//    return value_info;
-//}
-
 fn create_hash(k: &[u8]) -> String {
     let mut sha = Sha256::new();
     sha.input(k);
@@ -59,66 +52,72 @@ fn create_hash(k: &[u8]) -> String {
 
 impl KvOperation for KvOperationService{
     fn put(&mut self, ctx: RpcContext, put_kv_request: PutKvRequest, sink: UnarySink<PutKvResponse>){
-
-        let operation_type = put_kv_request.get_field_type();
-        let kv_entry = put_kv_request.get_entry();
-        let key = kv_entry.get_key().get_userKey();
-        let value = kv_entry.get_value();
-        let key_hash = create_hash(key);
-
-        let mut value_info = ValueInfo::new();
-
-
-        let db = DB::open_default(DB_PATH).unwrap();
         let mut put_kv_response = PutKvResponse::new();
 
-        if value.len() > SLICE_SIZE{
-            value_info.set_valueSliced(true);
-
-            let mut slice_info_vec = protobuf::RepeatedField::new();
-            let num_slice = value.len() / SLICE_SIZE;
-            let last_value_size = value.len() % SLICE_SIZE;
-            for i in 0..num_slice {
-                let temp = &value[(i * SLICE_SIZE) .. (i + 1) * SLICE_SIZE];
-                let temp_hash = create_hash(temp);
-                let slice_info = create_slice_info(key_hash.clone(),
-                                                   i as u32,
-                                                   (i*SLICE_SIZE) as u32,
-                                                   SLICE_SIZE as u32,
-                                                   temp_hash);
-                slice_info_vec.push(slice_info.clone());
-                // put <slice_info, slice_value>
-                match db.put(slice_info.write_to_bytes().unwrap().as_slice(), temp){
-                    Ok(()) => println!("successfully put <slice_info, slice_value>!"),
-//                    Ok(()) => println!("successfully put <slice_info, slice_value>! sliced value = {:?}", temp),
-                    Err(e) => {
-                        println!("operational problem encountered: {}", e);
-                        put_kv_response.set_status(OperationStatus::ERROR);
-                    },
-                }
-            }
-            if last_value_size != 0 {
-                let last_value = &value[(value.len() - last_value_size)..value.len()];
-//                println!("successfully put <slice_info, slice_value>! last sliced value = {:?}", last_value.clone());
-                value_info.set_lastValue(last_value.to_vec());
-            }
-            value_info.set_sliceInfo(slice_info_vec);
-
+        let operation_type = put_kv_request.get_field_type();
+        if operation_type != OperationType::PUT {
+            put_kv_response.set_status(OperationStatus::ERROR_TYPE_INCORRECT);
         } else {
-            value_info.set_valueSliced(false);
-            value_info.set_lastValue(value.to_vec());
-        }
+            let kv_entry = put_kv_request.get_entry();
+            let key = kv_entry.get_key();
+            let value = kv_entry.get_value();
+            let key_hash = create_hash(key.write_to_bytes().unwrap().as_slice());
 
+            let mut value_info = ValueInfo::new();
 
-        match db.put(key, value_info.write_to_bytes().unwrap().as_slice()) {
-            Ok(()) => {
-                println!("successfully put <key, value_info>");
-                put_kv_response.set_status(OperationStatus::SUCCESS);
-            },
-            Err(e) => {
-                println!("operational problem encountered: {}", e);
-                put_kv_response.set_status(OperationStatus::ERROR);
-            },
+            let db = DB::open_default(DB_PATH).unwrap();
+            if value.len() > SLICE_SIZE {
+                value_info.set_valueSliced(true);
+
+                let mut slice_info_key_vec = protobuf::RepeatedField::new();
+                let num_slice = value.len() / SLICE_SIZE;
+                let last_value_size = value.len() % SLICE_SIZE;
+                for i in 0..num_slice {
+                    let temp = &value[(i * SLICE_SIZE)..(i + 1) * SLICE_SIZE];
+                    let temp_hash = create_hash(temp);
+                    let slice_info = create_slice_info(key_hash.clone(),
+                                                       i as u32,
+                                                       (i * SLICE_SIZE) as u32,
+                                                       SLICE_SIZE as u32,
+                                                       temp_hash);
+                    let mut slice_info_key = Key::new();
+                    slice_info_key.set_userKey(slice_info.write_to_bytes().unwrap());
+                    slice_info_key.set_keyType(KeyType::SLICE_KEY);
+
+                    // put <slice_info_key, slice_value>
+                    match db.put(slice_info_key.write_to_bytes().unwrap().as_slice(), temp) {
+                        Ok(()) => println!("successfully put <slice_info, slice_value>!"),
+//                    Ok(()) => println!("successfully put <slice_info, slice_value>! sliced value = {:?}", temp),
+                        Err(e) => {
+                            println!("operational problem encountered: {}", e);
+                            put_kv_response.set_status(OperationStatus::ERROR_PUT_SLICE);
+                        },
+                    }
+
+                    slice_info_key_vec.push(slice_info_key.clone());
+                }
+                if last_value_size != 0 {
+                    let last_value = &value[(value.len() - last_value_size)..value.len()];
+//                println!("successfully put <slice_info, slice_value>! last sliced value = {:?}", last_value.clone());
+                    value_info.set_lastValue(last_value.to_vec());
+                }
+                value_info.set_sliceInfoKey(slice_info_key_vec);
+            } else {
+                value_info.set_valueSliced(false);
+                value_info.set_lastValue(value.to_vec());
+            }
+
+            // put <key, value_info>
+            match db.put(key.write_to_bytes().unwrap().as_slice(), value_info.write_to_bytes().unwrap().as_slice()) {
+                Ok(()) => {
+                    println!("successfully put <key, value_info>");
+                    put_kv_response.set_status(OperationStatus::SUCCESS);
+                },
+                Err(e) => {
+                    println!("operational problem encountered: {}", e);
+                    put_kv_response.set_status(OperationStatus::ERROR);
+                },
+            }
         }
 
         let f = sink
@@ -129,65 +128,69 @@ impl KvOperation for KvOperationService{
     }
 
     fn get(&mut self, ctx: RpcContext, get_kv_request: GetKvRequest, sink: UnarySink<GetKvResponse>){
-        let key = get_kv_request.get_key().get_userKey();
-        let operation_type = get_kv_request.get_field_type();
-//        println!("Received key = {:?}, operation type = {:?}", String::from_utf8_lossy(key), operation_type);
-
         let mut get_kv_response = GetKvResponse::new();
-        let db = DB::open_default(DB_PATH).unwrap();
-        match db.get(key) {
-            Ok(Some(value)) => {
-                println!("retrieved <key, value_info>");
-                let value_info:ValueInfo = protobuf::parse_from_bytes(value.to_vec().as_slice()).unwrap();
-                if !value_info.get_valueSliced() {
-                    get_kv_response.set_value(value_info.get_lastValue().to_vec());
-                    get_kv_response.set_status(OperationStatus::SUCCESS);
-                } else {
-                    let slice_infos = value_info.get_sliceInfo();
-                    let mut r_value: Vec<u8> = vec![];
-                    for i in 0..slice_infos.len() {
-                        let sli_in: &SliceInfo = slice_infos.get(i).unwrap();
-                        if sli_in.get_keyHash().ne(&create_hash(key.clone())){
-                            get_kv_response.set_status(OperationStatus::ERROR);
-                            break;
-                        }
-                        match db.get(sli_in.write_to_bytes().unwrap().as_slice()) {
-                            Ok(Some(z_value)) => {
+
+        let operation_type = get_kv_request.get_field_type();
+        if operation_type != OperationType::GET{
+            get_kv_response.set_status(OperationStatus::ERROR_TYPE_INCORRECT);
+        } else {
+            let key = get_kv_request.get_key();
+            let db = DB::open_default(DB_PATH).unwrap();
+            // get <key, vaue_info>
+            match db.get(key.write_to_bytes().unwrap().as_slice()) {
+                Ok(Some(value)) => {
+                    println!("retrieved <key, value_info>");
+                    let value_info: ValueInfo = protobuf::parse_from_bytes(value.to_vec().as_slice()).unwrap();
+                    if !value_info.get_valueSliced() {
+                        get_kv_response.set_value(value_info.get_lastValue().to_vec());
+                        get_kv_response.set_status(OperationStatus::SUCCESS);
+                    } else {
+                        let slice_info_keys= value_info.get_sliceInfoKey();
+                        let mut r_value: Vec<u8> = vec![];
+                        for i in 0..slice_info_keys.len() {
+                            let slice_info_key:&Key = slice_info_keys.get(i).unwrap();
+                            let slice_info :SliceInfo = protobuf::parse_from_bytes(slice_info_key.get_userKey()).unwrap();
+                            if slice_info.get_keyHash().ne(&create_hash(key.write_to_bytes().unwrap().as_slice())) {
+                                get_kv_response.set_status(OperationStatus::ERROR_KEY_HASH_INCORRECT);
+                                break;
+                            }
+                            // get <slice_info_key, slice_value>
+                            match db.get(slice_info_key.write_to_bytes().unwrap().as_slice()) {
+                                Ok(Some(z_value)) => {
 //                                println!("retrieved <slice_info, slice_value>");
-                                let mut slice_value = z_value.to_vec();
-                                println!("retrieved <slice_info, slice_value>.");
+                                    let mut slice_value = z_value.to_vec();
+                                    println!("retrieved <slice_info, slice_value>.");
 //                                println!("retrieved <slice_info, slice_value>. Sliced value = {:?}", slice_value);
-                                r_value.append(&mut slice_value);
-                            },
-                            Ok(None) => {
-                                println!("value not found");
-                                get_kv_response.set_status(OperationStatus::ERROR);
-                                break;
-                            },
-                            Err(e) => {
-                                println!("operational problem encountered: {}", e);
-                                get_kv_response.set_status(OperationStatus::ERROR);
-                                break;
-                            },
+                                    r_value.append(&mut slice_value);
+                                },
+                                Ok(None) => {
+                                    println!("value not found");
+                                    get_kv_response.set_status(OperationStatus::ERROR_SLICE_NOT_FOUND);
+                                    break;
+                                },
+                                Err(e) => {
+                                    println!("operational problem encountered: {}", e);
+                                    get_kv_response.set_status(OperationStatus::ERROR);
+                                    break;
+                                },
+                            }
                         }
-
-                    }
-                    let mut last_value = value_info.get_lastValue().to_vec();
-                    r_value.append(&mut last_value);
+                        let mut last_value = value_info.get_lastValue().to_vec();
+                        r_value.append(&mut last_value);
 //                    println!("total value = {:?}", r_value.clone());
-                    get_kv_response.set_value(r_value);
-                    get_kv_response.set_status(OperationStatus::SUCCESS);
-                }
-
-            },
-            Ok(None) => {
-                println!("value not found");
-                get_kv_response.set_status(OperationStatus::ERROR);
-            },
-            Err(e) => {
-                println!("operational problem encountered: {}", e);
-                get_kv_response.set_status(OperationStatus::ERROR);
-            },
+                        get_kv_response.set_value(r_value);
+                        get_kv_response.set_status(OperationStatus::SUCCESS);
+                    }
+                },
+                Ok(None) => {
+                    println!("value not found");
+                    get_kv_response.set_status(OperationStatus::ERROR_KEY_NOT_FOUND);
+                },
+                Err(e) => {
+                    println!("operational problem encountered: {}", e);
+                    get_kv_response.set_status(OperationStatus::ERROR);
+                },
+            }
         }
 
         let f = sink
@@ -198,21 +201,88 @@ impl KvOperation for KvOperationService{
     }
 
     fn delete(&mut self, ctx: RpcContext, delete_kv_request: DeleteKvRequest, sink: UnarySink<DeleteKvResponse>){
-        let key = delete_kv_request.get_key().get_userKey();
-        let operation_type = delete_kv_request.get_field_type();
-//        println!("Received key = {:?}, operation type = {:?}", String::from_utf8_lossy(key), operation_type);
-
         let mut delete_kv_response = DeleteKvResponse::new();
-        let db = DB::open_default(DB_PATH).unwrap();
-        match db.delete(key) {
-            Ok(()) => {
-//                println!("successfully delete!");
-                delete_kv_response.set_status(OperationStatus::SUCCESS);
-            },
-            Err(e) => {
-                println!("operational problem encountered: {}", e);
-                delete_kv_response.set_status(OperationStatus::ERROR);
-            },
+
+        let operation_type = delete_kv_request.get_field_type();
+        if operation_type != OperationType::DELETE{
+            delete_kv_response.set_status(OperationStatus::ERROR_TYPE_INCORRECT);
+        } else {
+            let key = delete_kv_request.get_key();
+            let db = DB::open_default(DB_PATH).unwrap();
+            match db.get(key.write_to_bytes().unwrap().as_slice()) {
+                Ok(Some(value)) => {
+                    println!("delete: retrieved <key, value_info>");
+                    let value_info: ValueInfo = protobuf::parse_from_bytes(value.to_vec().as_slice()).unwrap();
+                    if !value_info.get_valueSliced() {
+                        match db.delete(key.write_to_bytes().unwrap().as_slice()) {
+                            Ok(()) => {
+//                          println!("successfully delete!");
+                                delete_kv_response.set_status(OperationStatus::SUCCESS);
+                            },
+                            Err(e) => {
+                                println!("operational problem encountered: {}", e);
+                                delete_kv_response.set_status(OperationStatus::ERROR);
+                            },
+                        }
+                    } else {
+                        let slice_info_keys= value_info.get_sliceInfoKey();
+                        let mut r_value: Vec<u8> = vec![];
+                        for i in 0..slice_info_keys.len() {
+                            let slice_info_key: &Key = slice_info_keys.get(i).unwrap();
+                            let slice_info :SliceInfo = protobuf::parse_from_bytes(slice_info_key.get_userKey()).unwrap();
+                            if slice_info.get_keyHash().ne(&create_hash(key.write_to_bytes().unwrap().as_slice())) {
+                                delete_kv_response.set_status(OperationStatus::ERROR_KEY_HASH_INCORRECT);
+                                break;
+                            }
+                            // get <slice_info_key, slice_value>
+                            match db.get(slice_info_key.write_to_bytes().unwrap().as_slice()) {
+                                Ok(Some(z_value)) => {
+                                    // delete <slice_info_key, slice_value>
+                                    match db.delete(slice_info_key.write_to_bytes().unwrap().as_slice()) {
+                                        Ok(()) => {
+                                            println!("successfully deleted slice key!");
+                                        },
+                                        Err(e) => {
+                                            println!("operational problem encountered: {}", e);
+                                            delete_kv_response.set_status(OperationStatus::ERROR);
+                                            break;
+                                        },
+                                    }
+                                },
+                                Ok(None) => {
+                                    println!("value not found, no such slice key!");
+                                    delete_kv_response.set_status(OperationStatus::ERROR_SLICE_NOT_FOUND);
+                                    break;
+                                },
+                                Err(e) => {
+                                    println!("operational problem encountered: {}", e);
+                                    delete_kv_response.set_status(OperationStatus::ERROR);
+                                    break;
+                                },
+                            }
+                        }
+                        // delete <key, vaue_info>
+                        match db.delete(key.write_to_bytes().unwrap().as_slice()) {
+                            Ok(()) => {
+                                println!("successfully delete!");
+                                delete_kv_response.set_status(OperationStatus::SUCCESS);
+                            },
+                            Err(e) => {
+                                println!("operational problem encountered: {}", e);
+                                delete_kv_response.set_status(OperationStatus::ERROR);
+                            },
+                        }
+                    }
+                },
+                Ok(None) => {
+                    println!("value not found, no such key!");
+                    delete_kv_response.set_status(OperationStatus::ERROR_KEY_NOT_FOUND);
+                },
+                Err(e) => {
+                    println!("operational problem encountered: {}", e);
+                    delete_kv_response.set_status(OperationStatus::ERROR);
+                },
+            }
         }
 
         let f = sink
@@ -222,8 +292,111 @@ impl KvOperation for KvOperationService{
         ctx.spawn(f)
     }
 
-    fn scan(&mut self, ctx: RpcContext, get_kv_request: ScanKvRequest, sink: UnarySink<ScanKvResponse>){
-        // WIP
+    fn scan(&mut self, ctx: RpcContext, scan_kv_request: ScanKvRequest, sink: UnarySink<ScanKvResponse>){
+        let mut scan_kv_response = ScanKvResponse::new();
+
+        let operation_type = scan_kv_request.get_field_type();
+        if operation_type != OperationType::SCAN{
+            scan_kv_response.set_status(OperationStatus::ERROR_TYPE_INCORRECT);
+        } else {
+            let key = scan_kv_request.get_key();
+            let mut num_iter = 0;
+
+            let db = DB::open_default(DB_PATH).unwrap();
+            let mut iter = db.iterator(
+                IteratorMode::From(
+                    key.write_to_bytes().unwrap().as_slice(),
+                    Direction::Forward
+                )
+            );
+
+            let mut kv_entry_vec = protobuf::RepeatedField::new();
+            for (key, value) in iter {
+                num_iter += 1;
+                if num_iter > SCAN_MAX_KEYS {
+                    break;
+                }
+
+                let temp_key: Key = protobuf::parse_from_bytes(key.to_vec().as_slice()).unwrap();
+                // get <key, slice_info> pair
+                if temp_key.get_keyType() == KeyType::DEFAULT_KEY {
+                    match db.get(temp_key.write_to_bytes().unwrap().as_slice()) {
+                        Ok(Some(value)) => {
+                            println!("scan: retrieved <key, value_info>");
+                            let value_info: ValueInfo = protobuf::parse_from_bytes(value.to_vec().as_slice()).unwrap();
+
+                            if !value_info.get_valueSliced() {
+                                let mut kv = KvEntry::new();
+                                kv.set_key(temp_key.clone());
+                                kv.set_value(value_info.get_lastValue().to_vec());
+
+                                kv_entry_vec.push(kv);
+                            } else {
+                                let slice_info_keys= value_info.get_sliceInfoKey();
+                                let mut r_value: Vec<u8> = vec![];
+                                for i in 0..slice_info_keys.len() {
+                                    let slice_info_key:&Key = slice_info_keys.get(i).unwrap();
+                                    let slice_info :SliceInfo = protobuf::parse_from_bytes(slice_info_key.get_userKey()).unwrap();
+                                    if slice_info.get_keyHash().ne(&create_hash(temp_key.write_to_bytes().unwrap().as_slice())) {
+                                        scan_kv_response.set_status(OperationStatus::ERROR_KEY_HASH_INCORRECT);
+                                        break;
+                                    }
+                                    // get <slice_info_key, slice_value>
+                                    match db.get(slice_info_key.write_to_bytes().unwrap().as_slice()) {
+                                        Ok(Some(z_value)) => {
+//                                println!("retrieved <slice_info, slice_value>");
+                                            let mut slice_value = z_value.to_vec();
+                                            println!("retrieved <slice_info, slice_value>.");
+//                                println!("retrieved <slice_info, slice_value>. Sliced value = {:?}", slice_value);
+                                            r_value.append(&mut slice_value);
+                                        },
+                                        Ok(None) => {
+                                            println!("value not found");
+                                            scan_kv_response.set_status(OperationStatus::ERROR_SLICE_NOT_FOUND);
+                                            break;
+                                        },
+                                        Err(e) => {
+                                            println!("operational problem encountered: {}", e);
+                                            scan_kv_response.set_status(OperationStatus::ERROR);
+                                            break;
+                                        },
+                                    }
+                                }
+                                let mut last_value = value_info.get_lastValue().to_vec();
+                                r_value.append(&mut last_value);
+
+                                let mut kv = KvEntry::new();
+                                kv.set_key(temp_key.clone());
+                                kv.set_value(r_value.to_vec());
+
+                                kv_entry_vec.push(kv);
+                            }
+
+                            scan_kv_response.set_entries(kv_entry_vec.clone());
+                            scan_kv_response.set_token(temp_key.clone());
+                            scan_kv_response.set_status(OperationStatus::SUCCESS);
+                        },
+                        Ok(None) => {
+                            println!("value not found");
+                            scan_kv_response.set_status(OperationStatus::ERROR_KEY_NOT_FOUND);
+                            break;
+                        },
+                        Err(e) => {
+                            println!("operational problem encountered: {}", e);
+                            scan_kv_response.set_status(OperationStatus::ERROR);
+                            break;
+                        },
+                    }
+                }
+            }
+
+        }
+
+        let f = sink
+            .success(scan_kv_response.clone())
+            .map(move |_| println!("Responded with scan_kv_response {:?}", scan_kv_response.get_status()))
+            .map_err(move |err| eprintln!("Failed to reply: {:?}", err));
+        ctx.spawn(f)
     }
 }
 

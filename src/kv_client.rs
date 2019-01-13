@@ -11,21 +11,22 @@ use rand::Rng;
 
 use grpcio::{ChannelBuilder, EnvBuilder};
 
-use protos::record::{OperationType, OperationStatus, Key, KvEntry, PutKvRequest, GetKvRequest, DeleteKvRequest, ScanKvRequest};
+use protos::record::{KeyType, OperationType, OperationStatus, Key, KvEntry, PutKvRequest, GetKvRequest, DeleteKvRequest, ScanKvRequest};
 use protos::record_grpc::{KvOperationClient};
 
 // Todo: move configs to config.toml
 static THREAD_NUM: i32 = 100;
 static SLEEP_TIME_MILLIS: u64 = 0;
-// 4k
-static MAX_KEY_SIZE: i32 = 4 * 1024;
-// 2k + 2B
-static MAX_VALUE_SIZE: i32 = 2 * 1024 + 2;
+// 256 B
+static MAX_KEY_SIZE: i32 = 256;
+// 3k + 2b
+static MAX_VALUE_SIZE: i32 = 3 * 1024 + 2;
 
 
 fn create_key (k : Vec<u8>) -> Key {
     let mut key = Key::new();
     key.set_userKey(k);
+    key.set_keyType(KeyType::DEFAULT_KEY);
     return key;
 }
 
@@ -69,7 +70,7 @@ fn put_kv_single_test_with_key_value (client: KvOperationClient, key: Vec<u8>, v
 
     let put_kv_response = client.put(&put_kv_request).expect("RPC Failed");
     println!("Received put_kv_response = {:?}", put_kv_response.get_status());
-    assert_eq!(put_kv_response.get_status(), OperationStatus::SUCCESS);
+//    assert_eq!(put_kv_response.get_status(), OperationStatus::SUCCESS);
 }
 
 fn get_kv_single_test_with_key (client: KvOperationClient, key: Vec<u8>) -> Vec<u8>{
@@ -85,14 +86,29 @@ fn get_kv_single_test_with_key (client: KvOperationClient, key: Vec<u8>) -> Vec<
     return get_kv_response.value.as_slice().to_vec();
 }
 
-fn delete_kv_single_test (client: KvOperationClient){
+fn delete_kv_single_test_with_key (client: KvOperationClient, key: Vec<u8>){
     // delete_kv test
     let mut delete_kv_request = DeleteKvRequest::new();
     delete_kv_request.set_field_type(OperationType::DELETE);
-    delete_kv_request.set_key(create_key(b"key-xiao1".to_vec()));
+    delete_kv_request.set_key(create_key(key));
     let delete_kv_response = client.delete(&delete_kv_request).expect("RPC Failed");
     println!("Received delete_kv_response = {:?}", delete_kv_response.get_status());
-    assert_eq!(delete_kv_response.get_status(), OperationStatus::SUCCESS);
+//    assert_eq!(delete_kv_response.get_status(), OperationStatus::SUCCESS);
+}
+
+fn scan_kv_single_test_with_key (client: KvOperationClient, key: Vec<u8>) -> Vec<u8>{
+    // scan_kv test
+    let mut scan_kv_request = ScanKvRequest::new();
+    scan_kv_request.set_field_type(OperationType::SCAN);
+    scan_kv_request.set_key(create_key(key));
+    let scan_kv_response = client.scan(&scan_kv_request).expect("RPC Failed");
+    println!("Received scan_kv_response = {:?}", scan_kv_response.get_status());
+    println!("Received scan_kv = {:?}", scan_kv_response.get_entries());
+    println!("Received kv entries number = {:?}", scan_kv_response.get_entries().len());
+    println!("Received scan_kv_token = {:?}", scan_kv_response.get_token());
+//    assert_eq!(delete_kv_response.get_status(), OperationStatus::SUCCESS);
+
+    return scan_kv_response.get_token().get_userKey().to_vec();
 }
 
 fn create_put_kv_request (key_size: i32, value_size: i32) -> PutKvRequest{
@@ -127,42 +143,32 @@ fn multithreading_put_kv_test (threads_num : i32, port : i32, sleep : u64){
 fn main() {
     let port = 3334;
 
-//    // <samll-key, small-value> test to verify correctness
-//    let value=  b"chen".to_vec();
-//    put_kv_single_test_with_key_value(create_channels(port), b"xiao".to_vec(), value.clone());
-//    let ret_value = get_kv_single_test_with_key(create_channels(port), b"xiao1".to_vec());
-//    // verify correctness
-//    if ret_value.as_slice().eq(value.as_slice()) {
+//    // <key, value> put/get/delete/scan test to verify correctness
+//    let large_key = generate_random_bytes(MAX_KEY_SIZE);
+//    let large_value = generate_random_bytes(MAX_VALUE_SIZE);
+//    put_kv_single_test_with_key_value(create_channels(port), large_key.clone(), large_value.clone());
+//    let ret_value = get_kv_single_test_with_key(create_channels(port), large_key.clone());
+//    if ret_value.as_slice().eq(large_value.as_slice()) {
 //        println!("The value is the same.");
 //    } else {
 //        println!("Fatal: the value is not the same.");
+//        println!("{:?}", ret_value);
+//        println!("{:?}", large_value);
 //    }
+//    scan_kv_single_test_with_key(create_channels(port), large_key.clone());
+//    delete_kv_single_test_with_key(create_channels(port), large_key);
+//    delete_kv_single_test_with_key(create_channels(port), b"xiao".to_vec());
 
-//    // <large-key, small-value> test to verify correctness
-//    let key_random_bytes = generate_random_bytes(MAX_KEY_SIZE);
-//    let s_value = b"chen".to_vec();
-//    put_kv_single_test_with_key_value(create_channels(port), key_random_bytes.clone(), s_value.clone());
-//    let r_value = get_kv_single_test_with_key(create_channels(port), key_random_bytes);
-//    if r_value.as_slice().eq(value.as_slice()) {
-//        println!("The value is the same.");
-//    } else {
-//        println!("Fatal: the value is not the same.");
-//    }
-
-    // <large-key, large-value> test to verify correctness
-    let large_key = generate_random_bytes(MAX_KEY_SIZE);
-    let large_value = generate_random_bytes(MAX_VALUE_SIZE);
-    put_kv_single_test_with_key_value(create_channels(port), large_key.clone(), large_value.clone());
-    let ret_value = get_kv_single_test_with_key(create_channels(port), large_key);
-    if ret_value.as_slice().eq(large_value.as_slice()) {
-        println!("The value is the same.");
-    } else {
-        println!("Fatal: the value is not the same.");
-        println!("{:?}", ret_value);
-        println!("{:?}", large_value);
+    // scan test to verify correctness
+    for i in 0..20 {
+        put_kv_single_test_with_key_value(create_channels(port),
+                                          ("xiao".to_owned() + &i.to_string()).as_bytes().to_vec(),
+                                          ("chen".to_owned() + &i.to_string()).as_bytes().to_vec());
     }
+    let token = scan_kv_single_test_with_key(create_channels(port), b"xiao0".to_vec());
+    let token1 = scan_kv_single_test_with_key(create_channels(port),token);
+    let token2 = scan_kv_single_test_with_key(create_channels(port),token1);
 
-//    delete_kv_single_test(create_channels(port));
 
 //    multithreading_put_kv_test(THREAD_NUM, port, SLEEP_TIME_MILLIS);
 }

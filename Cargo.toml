@@ -17,7 +17,8 @@ name = "client"
 path = "src/kv_client.rs"
 
 [dependencies]
-rocksdb = { path = "rust-rocksdb" }
+#rocksdb = { path = "rust-rocksdb" }
+rocksdb = "0.11.0"
 grpcio = "0.4"
 grpcio-compiler = "0.4"
 futures = "0.1.16"
