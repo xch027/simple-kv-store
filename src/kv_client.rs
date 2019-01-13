@@ -166,8 +166,6 @@ fn main() {
                                           ("chen".to_owned() + &i.to_string()).as_bytes().to_vec());
     }
     let token = scan_kv_single_test_with_key(create_channels(port), b"xiao0".to_vec());
-    let token1 = scan_kv_single_test_with_key(create_channels(port),token);
-    let token2 = scan_kv_single_test_with_key(create_channels(port),token1);
 
 
 //    multithreading_put_kv_test(THREAD_NUM, port, SLEEP_TIME_MILLIS);
