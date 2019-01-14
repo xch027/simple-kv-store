@@ -43,7 +43,7 @@ fn get_db_with_configure() -> DB {
     DB::open_cf_descriptors(&opts, DB_PATH, vec![cf]).unwrap()
 }
 
-fn create_slice_info(key_hash: String, index: u32, offset: u32, length: u32, slice_hash: String) -> SliceInfo{
+fn create_slice_info(key_hash: String, index: u32, offset: u32, length: u32, slice_hash: String) -> SliceInfo {
     let mut slice_info = SliceInfo::new();
     slice_info.set_keyHash(key_hash);
     slice_info.set_index(index);
@@ -51,7 +51,7 @@ fn create_slice_info(key_hash: String, index: u32, offset: u32, length: u32, sli
     slice_info.set_length(length);
     slice_info.set_sliceHash(slice_hash);
 
-    return slice_info;
+    slice_info
 }
 
 fn create_hash(k: &[u8]) -> String {
@@ -59,11 +59,16 @@ fn create_hash(k: &[u8]) -> String {
     sha.input(k);
     let key_hash = sha.result_str();
 
-    return key_hash;
+    key_hash
 }
 
 impl KvOperation for KvOperationService{
-    fn put(&mut self, ctx: RpcContext, put_kv_request: PutKvRequest, sink: UnarySink<PutKvResponse>){
+    fn put(
+        &mut self,
+        ctx: RpcContext,
+        put_kv_request: PutKvRequest,
+        sink: UnarySink<PutKvResponse>
+    ){
         let mut put_kv_response = PutKvResponse::new();
 
         let operation_type = put_kv_request.get_field_type();
@@ -127,7 +132,8 @@ impl KvOperation for KvOperationService{
 
             if op_success_flag {
                 // put <key, value_info>
-                match batch.put(key.write_to_bytes().unwrap().as_slice(), value_info.write_to_bytes().unwrap().as_slice()) {
+                match batch.put(key.write_to_bytes().unwrap().as_slice(),
+                                value_info.write_to_bytes().unwrap().as_slice()) {
                     Ok(()) => {
                         println!("successfully batch put <key, value_info>");
                     },
@@ -158,7 +164,12 @@ impl KvOperation for KvOperationService{
         ctx.spawn(f)
     }
 
-    fn get(&mut self, ctx: RpcContext, get_kv_request: GetKvRequest, sink: UnarySink<GetKvResponse>){
+    fn get(
+        &mut self,
+        ctx: RpcContext,
+        get_kv_request: GetKvRequest,
+        sink: UnarySink<GetKvResponse>
+    ){
         let mut get_kv_response = GetKvResponse::new();
 
         let operation_type = get_kv_request.get_field_type();
@@ -236,7 +247,12 @@ impl KvOperation for KvOperationService{
         ctx.spawn(f)
     }
 
-    fn delete(&mut self, ctx: RpcContext, delete_kv_request: DeleteKvRequest, sink: UnarySink<DeleteKvResponse>){
+    fn delete(
+        &mut self,
+        ctx: RpcContext,
+        delete_kv_request: DeleteKvRequest,
+        sink: UnarySink<DeleteKvResponse>
+    ){
         let mut delete_kv_response = DeleteKvResponse::new();
 
         let operation_type = delete_kv_request.get_field_type();
@@ -335,7 +351,12 @@ impl KvOperation for KvOperationService{
     }
 
     // Todo: create index to improve scan performance
-    fn scan(&mut self, ctx: RpcContext, scan_kv_request: ScanKvRequest, sink: UnarySink<ScanKvResponse>){
+    fn scan(
+        &mut self,
+        ctx: RpcContext,
+        scan_kv_request: ScanKvRequest,
+        sink: UnarySink<ScanKvResponse>
+    ){
         let mut scan_kv_response = ScanKvResponse::new();
 
         let operation_type = scan_kv_request.get_field_type();
