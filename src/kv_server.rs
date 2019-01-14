@@ -235,7 +235,6 @@ impl KvOperation for KvOperationService{
             let db = get_db_with_configure();
             match db.get(key.write_to_bytes().unwrap().as_slice()) {
                 Ok(Some(value)) => {
-                    println!("delete: retrieved <key, value_info>");
                     let value_info: ValueInfo = protobuf::parse_from_bytes(value.to_vec().as_slice()).unwrap();
                     if !value_info.get_valueSliced() {
                         match db.delete(key.write_to_bytes().unwrap().as_slice()) {
@@ -250,7 +249,6 @@ impl KvOperation for KvOperationService{
                         }
                     } else {
                         let slice_info_keys= value_info.get_sliceInfoKey();
-                        let mut r_value: Vec<u8> = vec![];
                         for i in 0..slice_info_keys.len() {
                             let slice_info_key: &Key = slice_info_keys.get(i).unwrap();
                             let slice_info :SliceInfo = protobuf::parse_from_bytes(slice_info_key.get_userKey()).unwrap();
@@ -260,11 +258,11 @@ impl KvOperation for KvOperationService{
                             }
                             // get <slice_info_key, slice_value>
                             match db.get(slice_info_key.write_to_bytes().unwrap().as_slice()) {
-                                Ok(Some(z_value)) => {
+                                Ok(Some(_)) => {
                                     // delete <slice_info_key, slice_value>
                                     match db.delete(slice_info_key.write_to_bytes().unwrap().as_slice()) {
                                         Ok(()) => {
-                                            println!("successfully deleted slice key!");
+                                            println!("successfully deleted <slice_key, slice_value>!");
                                         },
                                         Err(e) => {
                                             println!("delete: operational problem encountered: {}", e);
@@ -285,10 +283,10 @@ impl KvOperation for KvOperationService{
                                 },
                             }
                         }
-                        // delete <key, vaue_info>
+                        // delete <key, value_info>
                         match db.delete(key.write_to_bytes().unwrap().as_slice()) {
                             Ok(()) => {
-                                println!("successfully delete!");
+                                println!("successfully delete <key, value_info>");
                                 delete_kv_response.set_status(OperationStatus::SUCCESS);
                             },
                             Err(e) => {
@@ -328,7 +326,7 @@ impl KvOperation for KvOperationService{
             let mut num_iter = 0;
 
             let db = get_db_with_configure();
-            let mut iter = db.iterator(
+            let iter = db.iterator(
                 IteratorMode::From(
                     key.write_to_bytes().unwrap().as_slice(),
                     Direction::Forward
@@ -336,7 +334,7 @@ impl KvOperation for KvOperationService{
             );
 
             let mut kv_entry_vec = protobuf::RepeatedField::new();
-            for (key, value) in iter {
+            for (key, _) in iter {
                 num_iter += 1;
                 if num_iter > SCAN_MAX_KEYS {
                     break;
