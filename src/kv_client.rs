@@ -15,7 +15,7 @@ use protos::record::{KeyType, OperationType, OperationStatus, Key, KvEntry, PutK
 use protos::record_grpc::{KvOperationClient};
 
 // Todo: move configs to config.toml
-static THREAD_NUM: i32 = 100;
+static THREAD_NUM: i32 = 400;
 static SLEEP_TIME_MILLIS: u64 = 0;
 // 256 B
 static MAX_KEY_SIZE: i32 = 256;
@@ -159,14 +159,14 @@ fn main() {
 //    delete_kv_single_test_with_key(create_channels(port), large_key);
 //    delete_kv_single_test_with_key(create_channels(port), b"xiao".to_vec());
 
-    // scan test to verify correctness
-    for i in 0..20 {
-        put_kv_single_test_with_key_value(create_channels(port),
-                                          ("xiao".to_owned() + &i.to_string()).as_bytes().to_vec(),
-                                          ("chen".to_owned() + &i.to_string()).as_bytes().to_vec());
-    }
-    let token = scan_kv_single_test_with_key(create_channels(port), b"xiao0".to_vec());
+//    // scan test to verify correctness
+//    for i in 0..20 {
+//        put_kv_single_test_with_key_value(create_channels(port),
+//                                          ("xiao".to_owned() + &i.to_string()).as_bytes().to_vec(),
+//                                          ("chen".to_owned() + &i.to_string()).as_bytes().to_vec());
+//    }
+//    let token = scan_kv_single_test_with_key(create_channels(port), b"xiao0".to_vec());
 
 
-//    multithreading_put_kv_test(THREAD_NUM, port, SLEEP_TIME_MILLIS);
+    multithreading_put_kv_test(THREAD_NUM, port, SLEEP_TIME_MILLIS);
 }

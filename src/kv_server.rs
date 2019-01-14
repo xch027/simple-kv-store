@@ -10,7 +10,7 @@ use crypto::sha2::Sha256;
 use std::io::Read;
 use std::sync::Arc;
 use std::{io, thread};
-use rocksdb::{DB, Direction, IteratorMode};
+use rocksdb::{DB, WriteBatch, Direction, IteratorMode};
 use rocksdb::DBCompactionStyle::Universal;
 
 use futures::sync::oneshot;
@@ -66,12 +66,14 @@ impl KvOperation for KvOperationService{
             let mut value_info = ValueInfo::new();
 
             let db = DB::open_default(DB_PATH).unwrap();
+            let mut batch = WriteBatch::default();
             if value.len() > SLICE_SIZE {
                 value_info.set_valueSliced(true);
 
                 let mut slice_info_key_vec = protobuf::RepeatedField::new();
                 let num_slice = value.len() / SLICE_SIZE;
                 let last_value_size = value.len() % SLICE_SIZE;
+
                 for i in 0..num_slice {
                     let temp = &value[(i * SLICE_SIZE)..(i + 1) * SLICE_SIZE];
                     let temp_hash = create_hash(temp);
@@ -85,9 +87,8 @@ impl KvOperation for KvOperationService{
                     slice_info_key.set_keyType(KeyType::SLICE_KEY);
 
                     // put <slice_info_key, slice_value>
-                    match db.put(slice_info_key.write_to_bytes().unwrap().as_slice(), temp) {
-                        Ok(()) => println!("successfully put <slice_info, slice_value>!"),
-//                    Ok(()) => println!("successfully put <slice_info, slice_value>! sliced value = {:?}", temp),
+                    match batch.put(slice_info_key.write_to_bytes().unwrap().as_slice(), temp){
+                        Ok(()) => println!("successfully batch put <slice_info, slice_value>!"),
                         Err(e) => {
                             println!("operational problem encountered: {}", e);
                             put_kv_response.set_status(OperationStatus::ERROR_PUT_SLICE);
@@ -108,7 +109,18 @@ impl KvOperation for KvOperationService{
             }
 
             // put <key, value_info>
-            match db.put(key.write_to_bytes().unwrap().as_slice(), value_info.write_to_bytes().unwrap().as_slice()) {
+            match batch.put(key.write_to_bytes().unwrap().as_slice(), value_info.write_to_bytes().unwrap().as_slice()){
+                Ok(()) => {
+                    println!("successfully batch put <key, value_info>");
+                },
+                Err(e) => {
+                    println!("operational problem encountered: {}", e);
+                    put_kv_response.set_status(OperationStatus::ERROR);
+                },
+            }
+
+            // instead, write batch to improve performance
+            match db.write(batch){
                 Ok(()) => {
                     println!("successfully put <key, value_info>");
                     put_kv_response.set_status(OperationStatus::SUCCESS);
