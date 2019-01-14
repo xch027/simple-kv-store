@@ -70,6 +70,7 @@ impl KvOperation for KvOperationService{
         if operation_type != OperationType::PUT {
             put_kv_response.set_status(OperationStatus::ERROR_TYPE_INCORRECT);
         } else {
+            let mut op_success_flag = true;
             let kv_entry = put_kv_request.get_entry();
             let key = kv_entry.get_key();
             let value = kv_entry.get_value();
@@ -99,48 +100,54 @@ impl KvOperation for KvOperationService{
                     slice_info_key.set_keyType(KeyType::SLICE_KEY);
 
                     // put <slice_info_key, slice_value>
-                    match batch.put(slice_info_key.write_to_bytes().unwrap().as_slice(), temp){
+                    match batch.put(slice_info_key.write_to_bytes().unwrap().as_slice(), temp) {
                         Ok(()) => println!("successfully batch put <slice_info, slice_value>"),
                         Err(e) => {
                             println!("operational problem encountered: {}", e);
                             put_kv_response.set_status(OperationStatus::ERROR_PUT_SLICE);
+                            op_success_flag = false;
+                            break;
                         },
                     }
 
                     slice_info_key_vec.push(slice_info_key.clone());
                 }
-                if last_value_size != 0 {
-                    let last_value = &value[(value.len() - last_value_size)..value.len()];
+                if op_success_flag {
+                    if last_value_size != 0 {
+                        let last_value = &value[(value.len() - last_value_size)..value.len()];
 //                println!("successfully put <slice_info, slice_value>! last sliced value = {:?}", last_value.clone());
-                    value_info.set_lastValue(last_value.to_vec());
+                        value_info.set_lastValue(last_value.to_vec());
+                    }
+                    value_info.set_sliceInfoKey(slice_info_key_vec);
                 }
-                value_info.set_sliceInfoKey(slice_info_key_vec);
             } else {
                 value_info.set_valueSliced(false);
                 value_info.set_lastValue(value.to_vec());
             }
 
-            // put <key, value_info>
-            match batch.put(key.write_to_bytes().unwrap().as_slice(), value_info.write_to_bytes().unwrap().as_slice()){
-                Ok(()) => {
-                    println!("successfully batch put <key, value_info>");
-                },
-                Err(e) => {
-                    println!("operational problem encountered: {}", e);
-                    put_kv_response.set_status(OperationStatus::ERROR);
-                },
-            }
+            if op_success_flag {
+                // put <key, value_info>
+                match batch.put(key.write_to_bytes().unwrap().as_slice(), value_info.write_to_bytes().unwrap().as_slice()) {
+                    Ok(()) => {
+                        println!("successfully batch put <key, value_info>");
+                    },
+                    Err(e) => {
+                        println!("operational problem encountered: {}", e);
+                        put_kv_response.set_status(OperationStatus::ERROR);
+                    },
+                }
 
-            // instead, write batch to improve performance
-            match db.write(batch){
-                Ok(()) => {
-                    println!("successfully put <key, value_info>");
-                    put_kv_response.set_status(OperationStatus::SUCCESS);
-                },
-                Err(e) => {
-                    println!("operational problem encountered: {}", e);
-                    put_kv_response.set_status(OperationStatus::ERROR);
-                },
+                // instead, write batch to improve performance
+                match db.write(batch) {
+                    Ok(()) => {
+                        println!("successfully put <key, value_info>");
+                        put_kv_response.set_status(OperationStatus::SUCCESS);
+                    },
+                    Err(e) => {
+                        println!("operational problem encountered: {}", e);
+                        put_kv_response.set_status(OperationStatus::ERROR);
+                    },
+                }
             }
         }
 
@@ -158,6 +165,7 @@ impl KvOperation for KvOperationService{
         if operation_type != OperationType::GET{
             get_kv_response.set_status(OperationStatus::ERROR_TYPE_INCORRECT);
         } else {
+            let mut op_success_flag = true;
             let key = get_kv_request.get_key();
             let db = get_db_with_configure();
             // get <key, vaue_info>
@@ -169,11 +177,11 @@ impl KvOperation for KvOperationService{
                         get_kv_response.set_value(value_info.get_lastValue().to_vec());
                         get_kv_response.set_status(OperationStatus::SUCCESS);
                     } else {
-                        let slice_info_keys= value_info.get_sliceInfoKey();
+                        let slice_info_keys = value_info.get_sliceInfoKey();
                         let mut r_value: Vec<u8> = vec![];
                         for i in 0..slice_info_keys.len() {
-                            let slice_info_key:&Key = slice_info_keys.get(i).unwrap();
-                            let slice_info :SliceInfo = protobuf::parse_from_bytes(slice_info_key.get_userKey()).unwrap();
+                            let slice_info_key: &Key = slice_info_keys.get(i).unwrap();
+                            let slice_info: SliceInfo = protobuf::parse_from_bytes(slice_info_key.get_userKey()).unwrap();
                             if slice_info.get_keyHash().ne(&create_hash(key.write_to_bytes().unwrap().as_slice())) {
                                 get_kv_response.set_status(OperationStatus::ERROR_KEY_HASH_INCORRECT);
                                 break;
@@ -190,20 +198,24 @@ impl KvOperation for KvOperationService{
                                 Ok(None) => {
                                     println!("get: value not found");
                                     get_kv_response.set_status(OperationStatus::ERROR_SLICE_NOT_FOUND);
+                                    op_success_flag = false;
                                     break;
                                 },
                                 Err(e) => {
                                     println!("get: operational problem encountered: {}", e);
                                     get_kv_response.set_status(OperationStatus::ERROR);
+                                    op_success_flag = false;
                                     break;
                                 },
                             }
                         }
-                        let mut last_value = value_info.get_lastValue().to_vec();
-                        r_value.append(&mut last_value);
+                        if op_success_flag {
+                            let mut last_value = value_info.get_lastValue().to_vec();
+                            r_value.append(&mut last_value);
 //                    println!("total value = {:?}", r_value.clone());
-                        get_kv_response.set_value(r_value);
-                        get_kv_response.set_status(OperationStatus::SUCCESS);
+                            get_kv_response.set_value(r_value);
+                            get_kv_response.set_status(OperationStatus::SUCCESS);
+                        }
                     }
                 },
                 Ok(None) => {
@@ -231,6 +243,7 @@ impl KvOperation for KvOperationService{
         if operation_type != OperationType::DELETE{
             delete_kv_response.set_status(OperationStatus::ERROR_TYPE_INCORRECT);
         } else {
+            let mut op_success_flag = true;
             let key = delete_kv_request.get_key();
             let db = get_db_with_configure();
             match db.get(key.write_to_bytes().unwrap().as_slice()) {
@@ -254,6 +267,7 @@ impl KvOperation for KvOperationService{
                             let slice_info :SliceInfo = protobuf::parse_from_bytes(slice_info_key.get_userKey()).unwrap();
                             if slice_info.get_keyHash().ne(&create_hash(key.write_to_bytes().unwrap().as_slice())) {
                                 delete_kv_response.set_status(OperationStatus::ERROR_KEY_HASH_INCORRECT);
+                                op_success_flag = false;
                                 break;
                             }
                             // get <slice_info_key, slice_value>
@@ -267,6 +281,7 @@ impl KvOperation for KvOperationService{
                                         Err(e) => {
                                             println!("delete: operational problem encountered: {}", e);
                                             delete_kv_response.set_status(OperationStatus::ERROR);
+                                            op_success_flag = false;
                                             break;
                                         },
                                     }
@@ -274,25 +289,30 @@ impl KvOperation for KvOperationService{
                                 Ok(None) => {
                                     println!("delete: value not found, no such slice key!");
                                     delete_kv_response.set_status(OperationStatus::ERROR_SLICE_NOT_FOUND);
+                                    op_success_flag = false;
                                     break;
                                 },
                                 Err(e) => {
                                     println!("delete: operational problem encountered: {}", e);
                                     delete_kv_response.set_status(OperationStatus::ERROR);
+                                    op_success_flag = false;
                                     break;
                                 },
                             }
                         }
-                        // delete <key, value_info>
-                        match db.delete(key.write_to_bytes().unwrap().as_slice()) {
-                            Ok(()) => {
-                                println!("successfully delete <key, value_info>");
-                                delete_kv_response.set_status(OperationStatus::SUCCESS);
-                            },
-                            Err(e) => {
-                                println!("delete: operational problem encountered: {}", e);
-                                delete_kv_response.set_status(OperationStatus::ERROR);
-                            },
+
+                        if op_success_flag {
+                            // delete <key, value_info>
+                            match db.delete(key.write_to_bytes().unwrap().as_slice()) {
+                                Ok(()) => {
+                                    println!("successfully delete <key, value_info>");
+                                    delete_kv_response.set_status(OperationStatus::SUCCESS);
+                                },
+                                Err(e) => {
+                                    println!("delete: operational problem encountered: {}", e);
+                                    delete_kv_response.set_status(OperationStatus::ERROR);
+                                },
+                            }
                         }
                     }
                 },
@@ -322,6 +342,7 @@ impl KvOperation for KvOperationService{
         if operation_type != OperationType::SCAN{
             scan_kv_response.set_status(OperationStatus::ERROR_TYPE_INCORRECT);
         } else {
+            let mut op_success_flag = true;
             let key = scan_kv_request.get_key();
             let mut num_iter = 0;
 
@@ -355,13 +376,14 @@ impl KvOperation for KvOperationService{
 
                                 kv_entry_vec.push(kv);
                             } else {
-                                let slice_info_keys= value_info.get_sliceInfoKey();
+                                let slice_info_keys = value_info.get_sliceInfoKey();
                                 let mut r_value: Vec<u8> = vec![];
                                 for i in 0..slice_info_keys.len() {
-                                    let slice_info_key:&Key = slice_info_keys.get(i).unwrap();
-                                    let slice_info :SliceInfo = protobuf::parse_from_bytes(slice_info_key.get_userKey()).unwrap();
+                                    let slice_info_key: &Key = slice_info_keys.get(i).unwrap();
+                                    let slice_info: SliceInfo = protobuf::parse_from_bytes(slice_info_key.get_userKey()).unwrap();
                                     if slice_info.get_keyHash().ne(&create_hash(temp_key.write_to_bytes().unwrap().as_slice())) {
                                         scan_kv_response.set_status(OperationStatus::ERROR_KEY_HASH_INCORRECT);
+                                        op_success_flag = false;
                                         break;
                                     }
                                     // get <slice_info_key, slice_value>
@@ -376,28 +398,33 @@ impl KvOperation for KvOperationService{
                                         Ok(None) => {
                                             println!("scan: value not found");
                                             scan_kv_response.set_status(OperationStatus::ERROR_SLICE_NOT_FOUND);
+                                            op_success_flag = false;
                                             break;
                                         },
                                         Err(e) => {
                                             println!("scan: operational problem encountered: {}", e);
                                             scan_kv_response.set_status(OperationStatus::ERROR);
+                                            op_success_flag = false;
                                             break;
                                         },
                                     }
                                 }
-                                let mut last_value = value_info.get_lastValue().to_vec();
-                                r_value.append(&mut last_value);
+                                if op_success_flag {
+                                    let mut last_value = value_info.get_lastValue().to_vec();
+                                    r_value.append(&mut last_value);
 
-                                let mut kv = KvEntry::new();
-                                kv.set_key(temp_key.clone());
-                                kv.set_value(r_value.to_vec());
+                                    let mut kv = KvEntry::new();
+                                    kv.set_key(temp_key.clone());
+                                    kv.set_value(r_value.to_vec());
 
-                                kv_entry_vec.push(kv);
+                                    kv_entry_vec.push(kv);
+                                }
                             }
-
-                            scan_kv_response.set_entries(kv_entry_vec.clone());
-                            scan_kv_response.set_token(temp_key.clone());
-                            scan_kv_response.set_status(OperationStatus::SUCCESS);
+                            if op_success_flag {
+                                scan_kv_response.set_entries(kv_entry_vec.clone());
+                                scan_kv_response.set_token(temp_key.clone());
+                                scan_kv_response.set_status(OperationStatus::SUCCESS);
+                            }
                         },
                         Ok(None) => {
                             println!("scan: value not found");
