@@ -24,11 +24,11 @@ use protobuf::Message;
 #[derive(Clone)]
 struct KvOperationService;
 
-static DB_PATH: &str = "/tmp/rocksdb.1";
+const DB_PATH: &str = "/tmp/rocksdb.1";
 // 256 B
-static SLICE_SIZE: usize = 256;
+const SLICE_SIZE: usize = 256;
 // max key number in scan
-static SCAN_MAX_KEYS: usize = 10;
+const SCAN_MAX_KEYS: usize = 10;
 
 fn get_db_with_configure() -> DB {
     // Todo: add more db configures

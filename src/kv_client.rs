@@ -15,12 +15,12 @@ use protos::record::{KeyType, OperationType, OperationStatus, Key, KvEntry, PutK
 use protos::record_grpc::{KvOperationClient};
 
 // Todo: move configs to config.toml
-static THREAD_NUM: i32 = 400;
-static SLEEP_TIME_MILLIS: u64 = 0;
+const THREAD_NUM: i32 = 400;
+const SLEEP_TIME_MILLIS: u64 = 0;
 // 256 B
-static MAX_KEY_SIZE: i32 = 256;
+const MAX_KEY_SIZE: i32 = 256;
 // 3k + 2b
-static MAX_VALUE_SIZE: i32 = 3 * 1024 + 2;
+const MAX_VALUE_SIZE: i32 = 3 * 1024 + 2;
 
 
 fn create_key (k : Vec<u8>) -> Key {
