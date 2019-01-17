@@ -6,6 +6,10 @@ extern crate rocksdb;
 
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
+#[macro_use]
+extern crate log;
+#[path = "log_util.rs"]
+mod log_util;
 
 use std::io::Read;
 use std::sync::Arc;
@@ -106,9 +110,9 @@ impl KvOperation for KvOperationService{
 
                     // put <slice_info_key, slice_value>
                     match batch.put(slice_info_key.write_to_bytes().unwrap().as_slice(), temp) {
-                        Ok(()) => println!("successfully batch put <slice_info, slice_value>"),
+                        Ok(()) => info!("successfully batch put <slice_info, slice_value>"),
                         Err(e) => {
-                            println!("operational problem encountered: {}", e);
+                            error!("operational problem encountered: {}", e);
                             put_kv_response.set_status(OperationStatus::ERROR_PUT_SLICE);
                             op_success_flag = false;
                             break;
@@ -135,10 +139,10 @@ impl KvOperation for KvOperationService{
                 match batch.put(key.write_to_bytes().unwrap().as_slice(),
                                 value_info.write_to_bytes().unwrap().as_slice()) {
                     Ok(()) => {
-                        println!("successfully batch put <key, value_info>");
+                        info!("successfully batch put <key, value_info>");
                     },
                     Err(e) => {
-                        println!("operational problem encountered: {}", e);
+                        error!("operational problem encountered: {}", e);
                         put_kv_response.set_status(OperationStatus::ERROR);
                     },
                 }
@@ -146,11 +150,11 @@ impl KvOperation for KvOperationService{
                 // instead, write batch to improve performance
                 match db.write(batch) {
                     Ok(()) => {
-                        println!("successfully put <key, value_info>");
+                        info!("successfully put <key, value_info>");
                         put_kv_response.set_status(OperationStatus::SUCCESS);
                     },
                     Err(e) => {
-                        println!("operational problem encountered: {}", e);
+                        error!("operational problem encountered: {}", e);
                         put_kv_response.set_status(OperationStatus::ERROR);
                     },
                 }
@@ -159,8 +163,8 @@ impl KvOperation for KvOperationService{
 
         let f = sink
             .success(put_kv_response.clone())
-            .map(move |_| println!("Responded with put_kv_response {:?}", put_kv_response.get_status()))
-            .map_err(move |err| eprintln!("Failed to reply: {:?}", err));
+            .map(move |_| info!("Responded with put_kv_response {:?}", put_kv_response.get_status()))
+            .map_err(move |err| error!("Failed to reply: {:?}", err));
         ctx.spawn(f)
     }
 
@@ -182,7 +186,7 @@ impl KvOperation for KvOperationService{
             // get <key, vaue_info>
             match db.get(key.write_to_bytes().unwrap().as_slice()) {
                 Ok(Some(value)) => {
-                    println!("get: retrieved <key, value_info>");
+                    info!("get: retrieved <key, value_info>");
                     let value_info: ValueInfo = protobuf::parse_from_bytes(value.to_vec().as_slice()).unwrap();
                     if !value_info.get_valueSliced() {
                         get_kv_response.set_value(value_info.get_lastValue().to_vec());
@@ -202,18 +206,18 @@ impl KvOperation for KvOperationService{
                                 Ok(Some(z_value)) => {
 //                                println!("retrieved <slice_info, slice_value>");
                                     let mut slice_value = z_value.to_vec();
-                                    println!("get: retrieved <slice_info, slice_value>");
+                                    info!("get: retrieved <slice_info, slice_value>");
 //                                println!("retrieved <slice_info, slice_value>. Sliced value = {:?}", slice_value);
                                     r_value.append(&mut slice_value);
                                 },
                                 Ok(None) => {
-                                    println!("get: value not found");
+                                    warn!("get: value not found");
                                     get_kv_response.set_status(OperationStatus::ERROR_SLICE_NOT_FOUND);
                                     op_success_flag = false;
                                     break;
                                 },
                                 Err(e) => {
-                                    println!("get: operational problem encountered: {}", e);
+                                    error!("get: operational problem encountered: {}", e);
                                     get_kv_response.set_status(OperationStatus::ERROR);
                                     op_success_flag = false;
                                     break;
@@ -230,11 +234,11 @@ impl KvOperation for KvOperationService{
                     }
                 },
                 Ok(None) => {
-                    println!("get: value not found");
+                    warn!("get: value not found");
                     get_kv_response.set_status(OperationStatus::ERROR_KEY_NOT_FOUND);
                 },
                 Err(e) => {
-                    println!("get: operational problem encountered: {}", e);
+                    error!("get: operational problem encountered: {}", e);
                     get_kv_response.set_status(OperationStatus::ERROR);
                 },
             }
@@ -242,8 +246,8 @@ impl KvOperation for KvOperationService{
 
         let f = sink
             .success(get_kv_response.clone())
-            .map(move |_| println!("Responded with get_kv_response {:?}", get_kv_response.get_status()))
-            .map_err(move |err| eprintln!("Failed to reply: {:?}", err));
+            .map(move |_| info!("Responded with get_kv_response {:?}", get_kv_response.get_status()))
+            .map_err(move |err| error!("Failed to reply: {:?}", err));
         ctx.spawn(f)
     }
 
@@ -272,7 +276,7 @@ impl KvOperation for KvOperationService{
                                 delete_kv_response.set_status(OperationStatus::SUCCESS);
                             },
                             Err(e) => {
-                                println!("delete: operational problem encountered: {}", e);
+                                error!("delete: operational problem encountered: {}", e);
                                 delete_kv_response.set_status(OperationStatus::ERROR);
                             },
                         }
@@ -292,10 +296,10 @@ impl KvOperation for KvOperationService{
                                     // delete <slice_info_key, slice_value>
                                     match db.delete(slice_info_key.write_to_bytes().unwrap().as_slice()) {
                                         Ok(()) => {
-                                            println!("successfully deleted <slice_key, slice_value>!");
+                                            info!("successfully deleted <slice_key, slice_value>!");
                                         },
                                         Err(e) => {
-                                            println!("delete: operational problem encountered: {}", e);
+                                            error!("delete: operational problem encountered: {}", e);
                                             delete_kv_response.set_status(OperationStatus::ERROR);
                                             op_success_flag = false;
                                             break;
@@ -303,13 +307,13 @@ impl KvOperation for KvOperationService{
                                     }
                                 },
                                 Ok(None) => {
-                                    println!("delete: value not found, no such slice key!");
+                                    warn!("delete: value not found, no such slice key!");
                                     delete_kv_response.set_status(OperationStatus::ERROR_SLICE_NOT_FOUND);
                                     op_success_flag = false;
                                     break;
                                 },
                                 Err(e) => {
-                                    println!("delete: operational problem encountered: {}", e);
+                                    error!("delete: operational problem encountered: {}", e);
                                     delete_kv_response.set_status(OperationStatus::ERROR);
                                     op_success_flag = false;
                                     break;
@@ -321,11 +325,11 @@ impl KvOperation for KvOperationService{
                             // delete <key, value_info>
                             match db.delete(key.write_to_bytes().unwrap().as_slice()) {
                                 Ok(()) => {
-                                    println!("successfully delete <key, value_info>");
+                                    info!("successfully delete <key, value_info>");
                                     delete_kv_response.set_status(OperationStatus::SUCCESS);
                                 },
                                 Err(e) => {
-                                    println!("delete: operational problem encountered: {}", e);
+                                    error!("delete: operational problem encountered: {}", e);
                                     delete_kv_response.set_status(OperationStatus::ERROR);
                                 },
                             }
@@ -333,11 +337,11 @@ impl KvOperation for KvOperationService{
                     }
                 },
                 Ok(None) => {
-                    println!("delete: value not found, no such key!");
+                    warn!("delete: value not found, no such key!");
                     delete_kv_response.set_status(OperationStatus::ERROR_KEY_NOT_FOUND);
                 },
                 Err(e) => {
-                    println!("delete: operational problem encountered: {}", e);
+                    error!("delete: operational problem encountered: {}", e);
                     delete_kv_response.set_status(OperationStatus::ERROR);
                 },
             }
@@ -345,8 +349,8 @@ impl KvOperation for KvOperationService{
 
         let f = sink
             .success(delete_kv_response.clone())
-            .map(move |_| println!("Responded with delete_kv_response {:?}", delete_kv_response.get_status()))
-            .map_err(move |err| eprintln!("Failed to reply: {:?}", err));
+            .map(move |_| info!("Responded with delete_kv_response {:?}", delete_kv_response.get_status()))
+            .map_err(move |err| error!("Failed to reply: {:?}", err));
         ctx.spawn(f)
     }
 
@@ -387,7 +391,7 @@ impl KvOperation for KvOperationService{
                 if temp_key.get_keyType() == KeyType::DEFAULT_KEY {
                     match db.get(temp_key.write_to_bytes().unwrap().as_slice()) {
                         Ok(Some(value)) => {
-                            println!("scan: retrieved <key, value_info>");
+                            info!("scan: retrieved <key, value_info>");
                             let value_info: ValueInfo = protobuf::parse_from_bytes(value.to_vec().as_slice()).unwrap();
 
                             if !value_info.get_valueSliced() {
@@ -412,18 +416,18 @@ impl KvOperation for KvOperationService{
                                         Ok(Some(z_value)) => {
 //                                println!("retrieved <slice_info, slice_value>");
                                             let mut slice_value = z_value.to_vec();
-                                            println!("scan: retrieved <slice_info, slice_value>.");
+                                            info!("scan: retrieved <slice_info, slice_value>.");
 //                                println!("retrieved <slice_info, slice_value>. Sliced value = {:?}", slice_value);
                                             r_value.append(&mut slice_value);
                                         },
                                         Ok(None) => {
-                                            println!("scan: value not found");
+                                            warn!("scan: value not found");
                                             scan_kv_response.set_status(OperationStatus::ERROR_SLICE_NOT_FOUND);
                                             op_success_flag = false;
                                             break;
                                         },
                                         Err(e) => {
-                                            println!("scan: operational problem encountered: {}", e);
+                                            error!("scan: operational problem encountered: {}", e);
                                             scan_kv_response.set_status(OperationStatus::ERROR);
                                             op_success_flag = false;
                                             break;
@@ -448,12 +452,12 @@ impl KvOperation for KvOperationService{
                             }
                         },
                         Ok(None) => {
-                            println!("scan: value not found");
+                            warn!("scan: value not found");
                             scan_kv_response.set_status(OperationStatus::ERROR_KEY_NOT_FOUND);
                             break;
                         },
                         Err(e) => {
-                            println!("scan: operational problem encountered: {}", e);
+                            error!("scan: operational problem encountered: {}", e);
                             scan_kv_response.set_status(OperationStatus::ERROR);
                             break;
                         },
@@ -465,8 +469,8 @@ impl KvOperation for KvOperationService{
 
         let f = sink
             .success(scan_kv_response.clone())
-            .map(move |_| println!("Responded with scan_kv_response {:?}", scan_kv_response.get_status()))
-            .map_err(move |err| eprintln!("Failed to reply: {:?}", err));
+            .map(move |_| info!("Responded with scan_kv_response {:?}", scan_kv_response.get_status()))
+            .map_err(move |err| error!("Failed to reply: {:?}", err));
         ctx.spawn(f)
     }
 }
@@ -474,6 +478,7 @@ impl KvOperation for KvOperationService{
 
 
 fn main() {
+    let _guard = log_util::init_log(None);
     let env = Arc::new(Environment::new(1));
     let service = record_grpc::create_kv_operation(KvOperationService);
     let mut server = ServerBuilder::new(env)
@@ -484,12 +489,12 @@ fn main() {
     server.start();
 
     for &(ref host, port) in server.bind_addrs() {
-        println!("{} listening on {}:{}", "kv_operation", host, port);
+        info!("{} listening on {}:{}", "kv_operation", host, port);
     }
 
     let (tx, rx) = oneshot::channel();
     thread::spawn(move || {
-        println!("Press ENTER to exit...");
+        info!("Press ENTER to exit...");
         let _ = io::stdin().read(&mut [0]).unwrap();
         tx.send(())
     });

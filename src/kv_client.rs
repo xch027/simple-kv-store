@@ -6,8 +6,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use std::mem::transmute;
-
-use rand::Rng;
+#[macro_use]
+extern crate log;
+#[path = "log_util.rs"]
+mod log_util;
 
 use grpcio::{ChannelBuilder, EnvBuilder};
 
@@ -58,8 +60,8 @@ fn put_kv_single_test_with_key_value_size (client: KvOperationClient, key_size: 
                                              generate_random_bytes(value_size)));
 
     let put_kv_response = client.put(&put_kv_request).expect("RPC Failed");
-    println!("Received put_kv_response = {:?}", put_kv_response.get_status());
-    assert_eq!(put_kv_response.get_status(), OperationStatus::SUCCESS);
+    info!("Received put_kv_response = {:?}", put_kv_response.get_status());
+//    assert_eq!(put_kv_response.get_status(), OperationStatus::SUCCESS);
 }
 
 fn put_kv_single_test_with_key_value (client: KvOperationClient, key: Vec<u8>, value: Vec<u8>) {
@@ -69,7 +71,7 @@ fn put_kv_single_test_with_key_value (client: KvOperationClient, key: Vec<u8>, v
     put_kv_request.set_entry(create_kv_entry(key, value));
 
     let put_kv_response = client.put(&put_kv_request).expect("RPC Failed");
-    println!("Received put_kv_response = {:?}", put_kv_response.get_status());
+    info!("Received put_kv_response = {:?}", put_kv_response.get_status());
 //    assert_eq!(put_kv_response.get_status(), OperationStatus::SUCCESS);
 }
 
@@ -80,7 +82,7 @@ fn get_kv_single_test_with_key (client: KvOperationClient, key: Vec<u8>) -> Vec<
     get_kv_request.set_key(create_key(key));
 
     let get_kv_response = client.get(&get_kv_request).expect("RPC Failed");
-    println!("Received get_kv_response = {:?}", get_kv_response.get_status());
+    info!("Received get_kv_response = {:?}", get_kv_response.get_status());
 //    assert_eq!(get_kv_response.get_status(), OperationStatus::SUCCESS);
 
     get_kv_response.value.as_slice().to_vec()
@@ -92,7 +94,7 @@ fn delete_kv_single_test_with_key (client: KvOperationClient, key: Vec<u8>){
     delete_kv_request.set_field_type(OperationType::DELETE);
     delete_kv_request.set_key(create_key(key));
     let delete_kv_response = client.delete(&delete_kv_request).expect("RPC Failed");
-    println!("Received delete_kv_response = {:?}", delete_kv_response.get_status());
+    info!("Received delete_kv_response = {:?}", delete_kv_response.get_status());
 //    assert_eq!(delete_kv_response.get_status(), OperationStatus::SUCCESS);
 }
 
@@ -102,10 +104,10 @@ fn scan_kv_single_test_with_key (client: KvOperationClient, key: Vec<u8>) -> Vec
     scan_kv_request.set_field_type(OperationType::SCAN);
     scan_kv_request.set_key(create_key(key));
     let scan_kv_response = client.scan(&scan_kv_request).expect("RPC Failed");
-    println!("Received scan_kv_response = {:?}", scan_kv_response.get_status());
+    info!("Received scan_kv_response = {:?}", scan_kv_response.get_status());
 //    println!("Received scan_kv = {:?}", scan_kv_response.get_entries());
-    println!("Received kv entries number = {:?}", scan_kv_response.get_entries().len());
-    println!("Received scan_kv_token = {:?}", scan_kv_response.get_token());
+    info!("Received kv entries number = {:?}", scan_kv_response.get_entries().len());
+    info!("Received scan_kv_token = {:?}", scan_kv_response.get_token());
 //    assert_eq!(delete_kv_response.get_status(), OperationStatus::SUCCESS);
 
     scan_kv_response.get_token().get_userKey().to_vec()
@@ -125,11 +127,11 @@ fn multithreading_put_kv_test (threads_num : i32, port : i32, sleep : u64){
     let mut threads = Vec::new();
     for i in 0..threads_num {
         threads.push(thread::spawn(move || {
-            println!("hi number {} from the spawned thread!", i);
+            info!("hi number {} from the spawned thread!", i);
             let client = create_channels(port);
             let put_kv_request = create_put_kv_request(MAX_KEY_SIZE, MAX_VALUE_SIZE);
             let put_kv_response = client.put(&put_kv_request).expect("RPC Failed");
-            println!("Received put_kv_response = {:?}", put_kv_response.get_status());
+            info!("Received put_kv_response = {:?}", put_kv_response.get_status());
 
             thread::sleep(Duration::from_millis(sleep));
         }));
@@ -141,6 +143,7 @@ fn multithreading_put_kv_test (threads_num : i32, port : i32, sleep : u64){
 }
 
 fn main() {
+    let _guard = log_util::init_log(None);
     let port = 3334;
 
     // <key, value> put/get/delete/scan test to verify correctness
@@ -149,11 +152,11 @@ fn main() {
     put_kv_single_test_with_key_value(create_channels(port), large_key.clone(), large_value.clone());
     let ret_value = get_kv_single_test_with_key(create_channels(port), large_key.clone());
     if ret_value.as_slice().eq(large_value.as_slice()) {
-        println!("The value is the same.");
+        info!("The value is the same.");
     } else {
-        println!("Fatal: the value is not the same.");
-        println!("{:?}", ret_value);
-        println!("{:?}", large_value);
+        error!("Fatal: the value is not the same.");
+        error!("{:?}", ret_value);
+        error!("{:?}", large_value);
     }
     scan_kv_single_test_with_key(create_channels(port), large_key.clone());
     delete_kv_single_test_with_key(create_channels(port), large_key);
