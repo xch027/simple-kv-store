@@ -13,7 +13,7 @@ mod log_util;
 
 use grpcio::{ChannelBuilder, EnvBuilder};
 
-use protos::record::{KeyType, OperationType, OperationStatus, Key, KvEntry, PutKvRequest, GetKvRequest, DeleteKvRequest, ScanKvRequest};
+use protos::record::{KvEntry, PutKvRequest, GetKvRequest, DeleteKvRequest, ScanKvRequest};
 use protos::record_grpc::{KvOperationClient};
 
 // Todo: move configs to config.toml
@@ -25,17 +25,9 @@ const MAX_KEY_SIZE: i32 = 256;
 const MAX_VALUE_SIZE: i32 = 3 * 1024 + 2;
 
 
-fn create_key (k : Vec<u8>) -> Key {
-    let mut key = Key::new();
-    key.set_userKey(k);
-    key.set_keyType(KeyType::DEFAULT_KEY);
-    key
-}
-
 fn create_kv_entry( k : Vec<u8>, v : Vec<u8>) -> KvEntry {
     let mut kv_entry = KvEntry::new();
-    let key = create_key(k);
-    kv_entry.set_key(key);
+    kv_entry.set_key(k);
     kv_entry.set_value(v);
     kv_entry
 }
@@ -55,35 +47,29 @@ fn generate_random_bytes (capacity : i32) -> Vec<u8> {
 fn put_kv_single_test_with_key_value_size (client: KvOperationClient, key_size: i32, value_size: i32) {
     // put_kv test
     let mut put_kv_request = PutKvRequest::new();
-    put_kv_request.set_field_type(OperationType::PUT);
     put_kv_request.set_entry(create_kv_entry(generate_random_bytes(key_size),
                                              generate_random_bytes(value_size)));
 
     let put_kv_response = client.put(&put_kv_request).expect("RPC Failed");
     info!("Received put_kv_response = {:?}", put_kv_response.get_status());
-//    assert_eq!(put_kv_response.get_status(), OperationStatus::SUCCESS);
 }
 
 fn put_kv_single_test_with_key_value (client: KvOperationClient, key: Vec<u8>, value: Vec<u8>) {
     // put_kv test
     let mut put_kv_request = PutKvRequest::new();
-    put_kv_request.set_field_type(OperationType::PUT);
     put_kv_request.set_entry(create_kv_entry(key, value));
 
     let put_kv_response = client.put(&put_kv_request).expect("RPC Failed");
     info!("Received put_kv_response = {:?}", put_kv_response.get_status());
-//    assert_eq!(put_kv_response.get_status(), OperationStatus::SUCCESS);
 }
 
 fn get_kv_single_test_with_key (client: KvOperationClient, key: Vec<u8>) -> Vec<u8>{
     // get_kv test
     let mut get_kv_request = GetKvRequest::new();
-    get_kv_request.set_field_type(OperationType::GET);
-    get_kv_request.set_key(create_key(key));
+    get_kv_request.set_key(key.clone());
 
     let get_kv_response = client.get(&get_kv_request).expect("RPC Failed");
-    info!("Received get_kv_response = {:?}", get_kv_response.get_status());
-//    assert_eq!(get_kv_response.get_status(), OperationStatus::SUCCESS);
+    info!("Received get value = {:?} with key = {:?}", get_kv_response.get_value(), key);
 
     get_kv_response.value.as_slice().to_vec()
 }
@@ -91,31 +77,34 @@ fn get_kv_single_test_with_key (client: KvOperationClient, key: Vec<u8>) -> Vec<
 fn delete_kv_single_test_with_key (client: KvOperationClient, key: Vec<u8>){
     // delete_kv test
     let mut delete_kv_request = DeleteKvRequest::new();
-    delete_kv_request.set_field_type(OperationType::DELETE);
-    delete_kv_request.set_key(create_key(key));
+    delete_kv_request.set_key(key);
     let delete_kv_response = client.delete(&delete_kv_request).expect("RPC Failed");
     info!("Received delete_kv_response = {:?}", delete_kv_response.get_status());
-//    assert_eq!(delete_kv_response.get_status(), OperationStatus::SUCCESS);
 }
 
-fn scan_kv_single_test_with_key (client: KvOperationClient, key: Vec<u8>) -> Vec<u8>{
+fn scan_kv_single_test_with_key (client: KvOperationClient,
+                                 start_key: Vec<u8>,
+//                                 end_key: Vec<u8>,
+                                 limit: u32,
+                                 reverse: bool,
+                                 key_only: bool)
+    -> Vec<KvEntry>{
     // scan_kv test
     let mut scan_kv_request = ScanKvRequest::new();
-    scan_kv_request.set_field_type(OperationType::SCAN);
-    scan_kv_request.set_key(create_key(key));
-    let scan_kv_response = client.scan(&scan_kv_request).expect("RPC Failed");
-    info!("Received scan_kv_response = {:?}", scan_kv_response.get_status());
-//    println!("Received scan_kv = {:?}", scan_kv_response.get_entries());
-    info!("Received kv entries number = {:?}", scan_kv_response.get_entries().len());
-    info!("Received scan_kv_token = {:?}", scan_kv_response.get_token());
-//    assert_eq!(delete_kv_response.get_status(), OperationStatus::SUCCESS);
 
-    scan_kv_response.get_token().get_userKey().to_vec()
+    scan_kv_request.set_start_key(start_key);
+//  scan_kv_request.set_end_key(end_key);
+    scan_kv_request.set_limit(limit);
+    scan_kv_request.set_reverse(reverse);
+    scan_kv_request.set_key_only(key_only);
+
+    let scan_kv_response = client.scan(&scan_kv_request).expect("RPC Failed");
+    info!("Received scanned kv entries number = {:?}", scan_kv_response.get_entries().len());
+    scan_kv_response.get_entries().to_vec()
 }
 
 fn create_put_kv_request (key_size: i32, value_size: i32) -> PutKvRequest{
     let mut put_kv_request = PutKvRequest::new();
-    put_kv_request.set_field_type(OperationType::PUT);
     let key_random_bytes = generate_random_bytes(key_size);
     let value_random_bytes = generate_random_bytes(value_size);
     put_kv_request.set_entry(create_kv_entry(key_random_bytes, value_random_bytes));
@@ -144,9 +133,9 @@ fn multithreading_put_kv_test (threads_num : i32, port : i32, sleep : u64){
 
 fn main() {
     let _guard = log_util::init_log(None);
-    let port = 3334;
+    let port = 3_334;
 
-    // <key, value> put/get/delete/scan test to verify correctness
+    info!("------ <key, value> put/get/delete/scan test to verify correctness -----");
     let large_key = generate_random_bytes(MAX_KEY_SIZE);
     let large_value = generate_random_bytes(MAX_VALUE_SIZE);
     put_kv_single_test_with_key_value(create_channels(port), large_key.clone(), large_value.clone());
@@ -158,18 +147,19 @@ fn main() {
         error!("{:?}", ret_value);
         error!("{:?}", large_value);
     }
-    scan_kv_single_test_with_key(create_channels(port), large_key.clone());
+    scan_kv_single_test_with_key(create_channels(port), large_key.clone(), 1, false, true);
     delete_kv_single_test_with_key(create_channels(port), large_key);
     delete_kv_single_test_with_key(create_channels(port), b"xiao".to_vec());
 
-//    // scan test to verify correctness
-//    for i in 0..20 {
-//        put_kv_single_test_with_key_value(create_channels(port),
-//                                          ("xiao".to_owned() + &i.to_string()).as_bytes().to_vec(),
-//                                          ("chen".to_owned() + &i.to_string()).as_bytes().to_vec());
-//    }
-//    let token = scan_kv_single_test_with_key(create_channels(port), b"xiao0".to_vec());
+    info!("------ scan test to verify correctness -----");
+    for i in 0..20 {
+        put_kv_single_test_with_key_value(create_channels(port),
+                                          ("xiao".to_owned() + &i.to_string()).as_bytes().to_vec(),
+                                          ("chen".to_owned() + &i.to_string()).as_bytes().to_vec());
+    }
+    let scanned_kv1 = scan_kv_single_test_with_key(create_channels(port), b"xiao0".to_vec(), 10, false, false);
+    info!("scanned kv = {:?}", scanned_kv1);
 
-
-//    multithreading_put_kv_test(THREAD_NUM, port, SLEEP_TIME_MILLIS);
+    info!("------ stress test ------");
+    multithreading_put_kv_test(THREAD_NUM, port, SLEEP_TIME_MILLIS);
 }
